@@ -233,12 +233,12 @@ class FyersData:
             return f"NSE:{symbol.replace('&', '%26')}-EQ"
         return symbol
 
-    def get_daily_data(self, symbol, days_back=30):
-        """Get daily OHLCV data with enhanced error handling."""
+    def get_daily_data(self, symbol: str, base_date: datetime.date, days_back: int = 45):
+        """Get daily OHLCV data with enhanced error handling, relative to a specific base_date."""
         perf_tracker.log_api_call()
         params = {"symbol": self.format_symbol(symbol), "resolution": "D", "date_format": "1",
-                  "range_from": (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d"),
-                  "range_to": datetime.now().strftime("%Y-%m-%d"), "cont_flag": "1"}
+                  "range_from": (base_date - timedelta(days=days_back)).strftime("%Y-%m-%d"),
+                  "range_to": base_date.strftime("%Y-%m-%d"), "cont_flag": "1"}
         try:
             response = self.client.history(params)
             if response.get('code') != 200:
@@ -324,13 +324,13 @@ class PreFilterEngine:
             'rejection_reasons': {}
         }
 
-    def filter_stock(self, symbol):
+    def filter_stock(self, symbol: str, backtest_date: datetime.date):
         """Enhanced filtering with detailed rejection tracking."""
         self.filter_stats['total_processed'] += 1
         perf_tracker.log_symbol_processed()
 
         try:
-            daily_df, error = self.fyers_data.get_daily_data(symbol, days_back=45)
+            daily_df, error = self.fyers_data.get_daily_data(symbol, base_date=backtest_date, days_back=45)
             if error or daily_df is None or len(daily_df) < 3:
                 self._track_rejection("Insufficient Data", error or "Not enough historical data")
                 return None, error or "Insufficient data"
@@ -386,11 +386,11 @@ class PreFilterEngine:
             self.filter_stats['rejection_reasons'][category] = []
         self.filter_stats['rejection_reasons'][category].append(reason)
 
-    def process_symbols(self, symbols: List[str]) -> Tuple[List[Dict], List[Dict]]:
+    def process_symbols(self, symbols: List[str], backtest_date: datetime.date) -> Tuple[List[Dict], List[Dict]]:
         """Process symbols with enhanced progress tracking and reporting."""
         ReportFormatter.print_section("Pre-Market Filtering")
         ReportFormatter.print_status(
-            f"Analyzing {len(symbols)} symbols against {len([c for c, _, _ in [('Price Range', True, ''), ('EMA Trend', True, ''), ('Higher High', True, ''), ('Bullish Candle', True, ''), ('Strength', True, ''), ('EMA Support', True, '')]])} criteria",
+            f"Analyzing {len(symbols)} symbols against {len([c for c, _, _ in [('Price Range', True, ''), ('EMA Trend', True, ''), ('Higher High', True, ''), ('Bullish Candle', True, ''), ('Strength', True, ''), ('EMA Support', True, '')]])} criteria for date {backtest_date.strftime('%Y-%m-%d')}",
             "INFO")
 
         filtered_stocks, failed_stocks = [], []
@@ -405,7 +405,7 @@ class PreFilterEngine:
             print(f"\r{Fore.WHITE}[{progress_pct:5.1f}%] Processing {symbol:<15} | ETA: {eta:4.0f}s{Style.RESET_ALL}",
                   end="")
 
-            stock_data, error = self.filter_stock(symbol)
+            stock_data, error = self.filter_stock(symbol, backtest_date)
             if stock_data:
                 filtered_stocks.append(stock_data)
             else:
@@ -972,7 +972,7 @@ def main():
 
         # --- STAGE 1: PRE-FILTERING ---
         pre_filter = PreFilterEngine(fyers_data)
-        filtered_stocks, _ = pre_filter.process_symbols(all_symbols)
+        filtered_stocks, _ = pre_filter.process_symbols(all_symbols, backtest_date)
 
         if not filtered_stocks:
             ReportFormatter.print_status(f"No stocks qualified for intraday analysis on {backtest_date.strftime('%Y-%m-%d')}. Skipping.", "WARNING")
