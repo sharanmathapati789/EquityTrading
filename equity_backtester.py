@@ -181,13 +181,16 @@ class FyersAuth:
                                               grant_type=cfg.GRANT_TYPE)
             auth_url = session.generate_authcode()
 
+            # Mask the client_id in the URL before printing/logging
+            masked_auth_url = re.sub(r'client_id=([^&]+)', f'client_id={cfg.CLIENT_ID[:4]}...{cfg.CLIENT_ID[-4:]}', auth_url)
+
             # For interactive parts, we print to console and also log to file
             print(f"\n{Fore.CYAN}Steps to authenticate:")
             logging.info("\nSteps to authenticate:")
             print(f"1. Copy and open this URL in your browser:")
             logging.info("1. Copy and open this URL in your browser:")
-            print(f"   {auth_url}")
-            logging.info(f"   {auth_url}")
+            print(f"   {masked_auth_url}")
+            logging.info(f"   {masked_auth_url}")
             print(f"2. Complete Fyers login and authorization")
             logging.info("2. Complete Fyers login and authorization")
             print(f"3. Copy the 'auth_code' from the redirect URL{Style.RESET_ALL}")
@@ -668,7 +671,7 @@ class OrderManager:
         if squared_off > 0:
             ReportFormatter.print_status(f"EOD Square-off completed for {squared_off} active positions", "INFO")
 
-    def generate_report(self):
+    def generate_report(self, output_folder: str):
         """Generate comprehensive trading report."""
         ReportFormatter.print_header("BACKTEST REPORT",
                                      f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -808,7 +811,7 @@ class OrderManager:
 
         # Save detailed report
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"Detailed_Trade_Report_{timestamp}.csv"
+        filename = os.path.join(output_folder, f"Detailed_Trade_Report_{timestamp}.csv")
         report_df.to_csv(filename, index=False)
 
         ReportFormatter.print_section("Report Export")
@@ -895,10 +898,13 @@ def validate_config():
 
 def main():
     """Enhanced main function with comprehensive reporting."""
-    # --- LOGGING SETUP ---
-    os.makedirs("run_logs", exist_ok=True)
+    # --- FOLDER AND LOGGING SETUP ---
+    # Create a date-stamped folder for all outputs of this run
+    output_folder = datetime.now().strftime('%d%m%y')
+    os.makedirs(output_folder, exist_ok=True)
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = f"run_logs/backtest_run_{timestamp}.log"
+    log_filename = os.path.join(output_folder, f"backtest_run_{timestamp}.log")
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -933,8 +939,17 @@ def main():
     logging.info(" " * 25 + "CONFIGURATION SETTINGS")
     logging.info("="*80)
     config_dict = {key: getattr(cfg, key) for key in dir(cfg) if not key.startswith('__')}
+    sensitive_keys = ['CLIENT_ID', 'SECRET_KEY']
     for key, value in config_dict.items():
-        logging.info(f"  {key:<30}: {value}")
+        if key in sensitive_keys:
+            # Mask the value: show first 4, last 4, and '...' in between
+            if isinstance(value, str) and len(value) > 8:
+                masked_value = f"{value[:4]}...{value[-4:]}"
+            else:
+                masked_value = '****'
+            logging.info(f"  {key:<30}: {masked_value}")
+        else:
+            logging.info(f"  {key:<30}: {value}")
     logging.info("="*80)
 
 
@@ -998,7 +1013,7 @@ def main():
     # Save historical data
     all_5min_df = pd.concat([df.assign(symbol=sym) for sym, df in five_min_data.items() if not df.empty])
     if not all_5min_df.empty:
-        hist_filename = f"Historical_Data_{backtest_date.strftime('%d%m%y')}.csv"
+        hist_filename = os.path.join(output_folder, f"Historical_Data_{backtest_date.strftime('%d%m%y')}.csv")
         all_5min_df.to_csv(hist_filename, index=False)
         ReportFormatter.print_status(f"Historical data exported to {hist_filename}", "SUCCESS")
 
@@ -1083,7 +1098,7 @@ def main():
     order_manager._scanner_stats = scanner.get_stats()
 
     # --- STAGE 3: COMPREHENSIVE REPORTING ---
-    order_manager.generate_report()
+    order_manager.generate_report(output_folder=output_folder)
 
     # Final system summary
     end_time = datetime.now()
