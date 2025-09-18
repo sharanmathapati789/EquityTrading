@@ -33,3 +33,10 @@ STAGE_SL_PERCENT = 0.4
 MARKET_OPEN_TIME = "09:15"
 MARKET_CLOSE_TIME = "15:15"
 DAY_END_SQUARE_OFF = "15:20" # Time to square off any open positions
+
+# Spurt Indicator Settings (for 1-min data)
+# NOTE: Added by agent as these were required by the backtester script but missing.
+VOLUME_WINDOW = 20
+ATR_WINDOW = 14
+VOLUME_SPURT_FACTOR = 2.5
+PRICE_SPURT_FACTOR = 1.5
