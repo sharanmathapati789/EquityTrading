@@ -480,7 +480,8 @@ class BreakoutScanner:
         # Initial Breakout Scan (opening candle)
         if candle_time == cfg.MARKET_OPEN_TIME:
             self.scan_stats['initial_scans'] += 1
-            if candle_open < pdh and candle_close > candle_open:
+            # Add the crucial check to ensure the high of the candle is above the previous day's high
+            if candle_open < pdh and candle_high > pdh and candle_close > candle_open:
                 rejection = (candle_high - candle_close) / (candle_high - candle_low) if (
                                                                                                      candle_high - candle_low) > 0 else 0
                 if rejection <= cfg.INITIAL_REJECTION_THRESHOLD:
@@ -553,7 +554,6 @@ class OrderManager:
         trade_type = trade_idea['type']
         entry_price = trade_idea['entry_point']
         sl_pct = cfg.INITIAL_SL_PERCENT if trade_type == 'Initial' else cfg.STAGE_SL_PERCENT
-        target_pct = cfg.INITIAL_TARGET_PERCENT if trade_type == 'Initial' else cfg.STAGE_TARGET_PERCENT
 
         trade = {
             'symbol': trade_idea['symbol'],
@@ -563,11 +563,10 @@ class OrderManager:
             'entry_point': entry_price,
             'status': 'pending',
             'stop_loss': round(entry_price * (1 - sl_pct / 100), 2),
-            'target': round(entry_price * (1 + target_pct / 100), 2),
+            'highest_price_since_entry': entry_price, # Initialize with entry price
+            'trailing_stop_loss': round(entry_price * (1 - cfg.TRAILING_SL_PERCENT / 100), 2),
             'sl_percent': sl_pct,
-            'target_percent': target_pct,
-            'candle_data': trade_idea.get('candle_data', {}),
-            'risk_reward': round(target_pct / sl_pct, 2)
+            'candle_data': trade_idea.get('candle_data', {})
         }
 
         self.active_trades.append(trade)
@@ -575,7 +574,7 @@ class OrderManager:
         self.trade_stats['pending_trades'] += 1
 
         ReportFormatter.print_status(
-            f"Trade setup: {trade['symbol']} ({trade_type}) | Entry: {ReportFormatter.format_currency(entry_price)} | R:R = 1:{trade['risk_reward']}",
+            f"Trade setup: {trade['symbol']} ({trade_type}) | Entry: {ReportFormatter.format_currency(entry_price)}",
             "INFO"
         )
 
@@ -620,12 +619,21 @@ class OrderManager:
 
             # Process active trades for exit conditions
             elif trade['status'] == 'active':
+                # Update high-water mark and recalculate trailing stop
+                if high > trade['highest_price_since_entry']:
+                    trade['highest_price_since_entry'] = high
+                    new_tsl = round(high * (1 - cfg.TRAILING_SL_PERCENT / 100), 2)
+                    # The TSL only moves up, never down
+                    if new_tsl > trade['trailing_stop_loss']:
+                        trade['trailing_stop_loss'] = new_tsl
+
                 exit_reason, exit_price = None, None
 
+                # Check for exit conditions: initial SL or trailing SL
                 if low <= trade['stop_loss']:
                     exit_reason, exit_price = 'STOP_LOSS', trade['stop_loss']
-                elif high >= trade['target']:
-                    exit_reason, exit_price = 'TARGET', trade['target']
+                elif low <= trade['trailing_stop_loss']:
+                    exit_reason, exit_price = 'TRAIL_SL_HIT', trade['trailing_stop_loss']
                 elif current_time >= cfg.DAY_END_SQUARE_OFF:
                     exit_reason, exit_price = 'EOD_SQUARE_OFF', current_close
 

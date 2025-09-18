@@ -20,14 +20,17 @@ BACKTEST_DAYS = 1  # Number of past trading days to backtest
 CANDLE_INTERVAL = "5"  # 5-minute candles for monitoring
 MINUTE_RESOLUTION = "1"  # 1-minute data for detailed backtesting
 
-# Initial Breakout Strategy Settings
-INITIAL_REJECTION_THRESHOLD = 0.30  # 30% rejection rule for the first candle
-INITIAL_TARGET_PERCENT = 1.2
+# Strategy Settings
+INITIAL_REJECTION_THRESHOLD = 0.30
 INITIAL_SL_PERCENT = 0.6
-
-# Stage Breakout Strategy Settings
-STAGE_TARGET_PERCENT = 0.8
 STAGE_SL_PERCENT = 0.4
+TRAILING_SL_PERCENT = 1.0 # The trailing stop-loss percentage below the high-water mark
+
+# Spurt Indicator Settings (for 1-min data)
+VOLUME_WINDOW = 20
+ATR_WINDOW = 14
+VOLUME_SPURT_FACTOR = 2.5
+PRICE_SPURT_FACTOR = 1.5
 
 # Market Timings (IST)
 MARKET_OPEN_TIME = "09:15"
