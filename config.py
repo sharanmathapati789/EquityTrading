@@ -7,7 +7,7 @@ RESPONSE_TYPE = 'code'
 GRANT_TYPE = 'authorization_code'
 
 # File Paths
-SYMBOL_CSV = "/Users/Scripts/Equity/EQ_ST_EMA/Fyers/Nifty_SmallCap.csv" # Using local file for testing
+SYMBOL_CSV = "symbols.csv" # Using local file for testing
 ACCESS_TOKEN_FILE = "fyers_access_token.json"
 
 # Pre-filter Criteria
