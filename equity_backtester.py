@@ -62,8 +62,8 @@ class ReportFormatter:
     @staticmethod
     def print_section(title: str):
         """Print a section header"""
-        logging.info(f"\n{Fore.YELLOW}▶ {title}{Style.RESET_ALL}")
-        logging.info(f"{Fore.YELLOW}{'─' * (len(title) + 3)}{Style.RESET_ALL}")
+        logging.info(f"\n{Fore.BLUE}▶ {title}{Style.RESET_ALL}")
+        logging.info(f"{Fore.BLUE}{'─' * (len(title) + 3)}{Style.RESET_ALL}")
 
     @staticmethod
     def print_status(message: str, status: str = "INFO"):
@@ -73,8 +73,8 @@ class ReportFormatter:
             "INFO": Fore.BLUE,
             "SUCCESS": Fore.GREEN,
             "WARNING": Fore.YELLOW,
-            "ERROR": Fore.RED,
-            "TRADE": Fore.MAGENTA
+            "ERROR": Fore.MAGENTA, # Changed from RED
+            "TRADE": Fore.CYAN      # Changed from MAGENTA
         }
         color = colors.get(status, Fore.WHITE)
         logging.info(f"{Fore.WHITE}[{timestamp}] {color}[{status}]{Style.RESET_ALL} {message}")
@@ -87,7 +87,7 @@ class ReportFormatter:
     @staticmethod
     def format_percentage(pct: float, decimals: int = 2) -> str:
         """Format percentage with color coding"""
-        color = Fore.GREEN if pct >= 0 else Fore.RED
+        color = Fore.GREEN if pct >= 0 else Fore.MAGENTA
         return f"{color}{pct:+.{decimals}f}%{Style.RESET_ALL}"
 
 
@@ -182,7 +182,7 @@ class FyersAuth:
             auth_url = session.generate_authcode()
 
             # Mask the client_id in the URL before printing/logging
-            masked_auth_url = re.sub(r'client_id=([^&]+)', f'client_id={cfg.CLIENT_ID[:4]}...{cfg.CLIENT_ID[-4:]}', auth_url)
+            masked_auth_url = re.sub(r'client_id=([^&]+)', 'client_id=********', auth_url)
 
             # For interactive parts, we print to console and also log to file
             print(f"\n{Fore.CYAN}Steps to authenticate:")
@@ -429,7 +429,7 @@ class PreFilterEngine:
 
         # Show top rejection reasons
         if self.filter_stats['rejection_reasons']:
-            logging.info(f"\n{Fore.YELLOW}Top Rejection Categories:{Style.RESET_ALL}")
+            logging.info(f"\n{Fore.BLUE}Top Rejection Categories:{Style.RESET_ALL}")
             rejection_counts = {cat: len(reasons) for cat, reasons in self.filter_stats['rejection_reasons'].items()}
             for category, count in sorted(rejection_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
                 logging.info(f"  • {category:<15}: {count:>3} stocks")
@@ -898,13 +898,10 @@ def validate_config():
 
 def main():
     """Enhanced main function with comprehensive reporting."""
-    # --- FOLDER AND LOGGING SETUP ---
-    # Create a date-stamped folder for all outputs of this run
-    output_folder = datetime.now().strftime('%d%m%y')
-    os.makedirs(output_folder, exist_ok=True)
-
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = os.path.join(output_folder, f"backtest_run_{timestamp}.log")
+    # --- LOGGING SETUP (FOR THE ENTIRE RUN) ---
+    os.makedirs("run_logs", exist_ok=True)
+    run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = os.path.join("run_logs", f"backtest_run_{run_timestamp}.log")
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -919,22 +916,18 @@ def main():
     file_handler.setFormatter(StripAnsiFormatter('%(message)s'))
     logger.addHandler(file_handler)
 
-    logging.info(f"Log file for this run: {log_filename}")
+    logging.info(f"Log file for this multi-day run: {log_filename}")
 
-    # --- Original Main Function Starts Here ---
     ReportFormatter.print_header(
         "EQUITY BACKTESTING SYSTEM",
         f"Professional Trading Strategy Analysis | Version 2.0"
     )
 
-    # Configuration validation
+    # --- CONFIGURATION VALIDATION AND LOGGING ---
     if not validate_config():
         ReportFormatter.print_status("Configuration validation failed. Please check config.py", "ERROR")
         return
 
-    start_time = datetime.now()
-
-    # --- LOGGING CONFIGURATION ---
     logging.info("\n" + "="*80)
     logging.info(" " * 25 + "CONFIGURATION SETTINGS")
     logging.info("="*80)
@@ -942,29 +935,11 @@ def main():
     sensitive_keys = ['CLIENT_ID', 'SECRET_KEY']
     for key, value in config_dict.items():
         if key in sensitive_keys:
-            # Mask the value: show first 4, last 4, and '...' in between
-            if isinstance(value, str) and len(value) > 8:
-                masked_value = f"{value[:4]}...{value[-4:]}"
-            else:
-                masked_value = '****'
+            masked_value = '********'
             logging.info(f"  {key:<30}: {masked_value}")
         else:
             logging.info(f"  {key:<30}: {value}")
     logging.info("="*80)
-
-
-    # Display system configuration
-    ReportFormatter.print_section("System Configuration")
-    config_data = [
-        ["Backtest Date", get_trading_day(cfg.BACKTEST_DAYS).strftime('%Y-%m-%d')],
-        ["Price Range",
-         f"{ReportFormatter.format_currency(cfg.MIN_PRICE)} - {ReportFormatter.format_currency(cfg.MAX_PRICE)}"],
-        ["EMA Period", f"{cfg.EMA_LENGTH} days"],
-        ["Market Hours", f"{cfg.MARKET_OPEN_TIME} - {cfg.MARKET_CLOSE_TIME}"],
-        ["Analysis Resolution", f"{cfg.CANDLE_INTERVAL}min / {cfg.MINUTE_RESOLUTION}min"],
-        ["Square-off Time", cfg.DAY_END_SQUARE_OFF]
-    ]
-    logging.info(tabulate(config_data, headers=["Parameter", "Value"], tablefmt="rounded_grid"))
 
     # --- AUTHENTICATION ---
     access_token = FyersAuth().authenticate()
@@ -974,7 +949,7 @@ def main():
 
     fyers_data = FyersData(access_token)
 
-    # --- STAGE 1: PRE-FILTERING ---
+    # --- SYMBOL LOADING ---
     try:
         all_symbols = pd.read_csv(cfg.SYMBOL_CSV)['fyers_symbol'].dropna().tolist()
         ReportFormatter.print_status(f"Loaded {len(all_symbols)} symbols from {cfg.SYMBOL_CSV}", "SUCCESS")
@@ -982,154 +957,110 @@ def main():
         ReportFormatter.print_status(f"Failed to load symbols: {e}", "ERROR")
         return
 
-    pre_filter = PreFilterEngine(fyers_data)
-    filtered_stocks, failed_stocks = pre_filter.process_symbols(all_symbols)
+    # --- MAIN BACKTESTING LOOP ---
+    for day_offset in range(1, cfg.BACKTEST_DAYS + 1):
 
-    if not filtered_stocks:
-        ReportFormatter.print_status("No stocks qualified for intraday analysis", "WARNING")
-        return
+        backtest_date = get_trading_day(day_offset)
 
-    pre_filtered_symbols = [s['symbol'] for s in filtered_stocks]
-    pdh_map = {s['symbol']: s['pdh'] for s in filtered_stocks}
+        # Create a date-stamped folder for this specific day's output
+        output_folder = backtest_date.strftime('%d%m%y')
+        os.makedirs(output_folder, exist_ok=True)
 
-    # --- STAGE 2: INTRADAY BACKTESTING ---
-    backtest_date = get_trading_day(cfg.BACKTEST_DAYS)
-    ReportFormatter.print_section("Intraday Data Collection")
+        logging.info("\n\n" + "#"*80)
+        logging.info(f"###### STARTING BACKTEST FOR DATE: {backtest_date.strftime('%Y-%m-%d')} ######")
+        logging.info("#"*80 + "\n")
 
-    # Fetch market data
-    five_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.CANDLE_INTERVAL)
-    one_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.MINUTE_RESOLUTION)
+        # --- STAGE 1: PRE-FILTERING ---
+        pre_filter = PreFilterEngine(fyers_data)
+        filtered_stocks, _ = pre_filter.process_symbols(all_symbols)
 
-    # Process indicators
-    ReportFormatter.print_status("Calculating technical indicators for 1-minute data", "INFO")
-    indicator_count = 0
-    for symbol in one_min_data:
-        if not one_min_data[symbol].empty:
-            one_min_data[symbol] = calculate_spurt_indicators(one_min_data[symbol])
-            indicator_count += 1
+        if not filtered_stocks:
+            ReportFormatter.print_status(f"No stocks qualified for intraday analysis on {backtest_date.strftime('%Y-%m-%d')}. Skipping.", "WARNING")
+            continue
 
-    ReportFormatter.print_status(f"Technical indicators calculated for {indicator_count} symbols", "SUCCESS")
+        pre_filtered_symbols = [s['symbol'] for s in filtered_stocks]
+        pdh_map = {s['symbol']: s['pdh'] for s in filtered_stocks}
 
-    # Save historical data
-    all_5min_df = pd.concat([df.assign(symbol=sym) for sym, df in five_min_data.items() if not df.empty])
-    if not all_5min_df.empty:
+        # --- STAGE 2: INTRADAY BACKTESTING ---
+        ReportFormatter.print_section(f"Intraday Data Collection for {backtest_date.strftime('%Y-%m-%d')}")
+        five_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.CANDLE_INTERVAL)
+        one_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.MINUTE_RESOLUTION)
+
+        ReportFormatter.print_status("Calculating technical indicators for 1-minute data", "INFO")
+        indicator_count = 0
+        for symbol in one_min_data:
+            if not one_min_data[symbol].empty:
+                one_min_data[symbol] = calculate_spurt_indicators(one_min_data[symbol])
+                indicator_count += 1
+        ReportFormatter.print_status(f"Technical indicators calculated for {indicator_count} symbols", "SUCCESS")
+
         hist_filename = os.path.join(output_folder, f"Historical_Data_{backtest_date.strftime('%d%m%y')}.csv")
-        all_5min_df.to_csv(hist_filename, index=False)
-        ReportFormatter.print_status(f"Historical data exported to {hist_filename}", "SUCCESS")
+        all_5min_df = pd.concat([df.assign(symbol=sym) for sym, df in five_min_data.items() if not df.empty])
+        if not all_5min_df.empty:
+            all_5min_df.to_csv(hist_filename, index=False)
+            ReportFormatter.print_status(f"Historical data exported to {hist_filename}", "SUCCESS")
 
-    # Initialize trading components
-    scanner = BreakoutScanner()
-    order_manager = OrderManager()
+        scanner = BreakoutScanner()
+        order_manager = OrderManager()
 
-    # --- UNIFIED SIMULATION LOOP ---
-    ReportFormatter.print_section("Market Simulation")
-    ReportFormatter.print_status("Starting unified market simulation loop...", "INFO")
-    breakouts_detected = 0
+        ReportFormatter.print_section(f"Market Simulation for {backtest_date.strftime('%Y-%m-%d')}")
+        all_1min_datetimes = []
+        for df in one_min_data.values():
+            if not df.empty:
+                all_1min_datetimes.extend(df['datetime'].tolist())
 
-    # Get all unique timestamps from 1-minute data, which will drive the simulation
-    all_1min_datetimes = []
-    for df in one_min_data.values():
-        if not df.empty:
-            all_1min_datetimes.extend(df['datetime'].tolist())
+        if not all_1min_datetimes:
+            ReportFormatter.print_status("No 1-minute data available to run simulation.", "WARNING")
+        else:
+            unique_1min_datetimes = sorted(list(set(all_1min_datetimes)))
+            ReportFormatter.print_status(f"Market simulation ready: Processing {len(unique_1min_datetimes)} 1-minute candles.", "INFO")
+            for i, candle_start_dt in enumerate(unique_1min_datetimes):
+                current_processing_dt = candle_start_dt + timedelta(minutes=1)
+                current_processing_time_str = current_processing_dt.strftime("%H:%M")
+                if current_processing_time_str > cfg.DAY_END_SQUARE_OFF:
+                    break
+                print(f"\r{Fore.WHITE}Processing Time: {current_processing_time_str} ({i+1}/{len(unique_1min_datetimes)}){Style.RESET_ALL}", end="")
+                if current_processing_dt.minute % int(cfg.CANDLE_INTERVAL) == 0:
+                    five_min_candle_start_dt = current_processing_dt - timedelta(minutes=int(cfg.CANDLE_INTERVAL))
+                    five_min_candle_start_time_str = five_min_candle_start_dt.strftime("%H:%M")
+                    stocks_in_5min_candle = {}
+                    for sym, df in five_min_data.items():
+                        if not df.empty and five_min_candle_start_time_str in df['time'].values:
+                            stocks_in_5min_candle[sym] = df[df['time'] == five_min_candle_start_time_str].iloc[0]
+                    for symbol, five_min_candle in stocks_in_5min_candle.items():
+                        if symbol in pdh_map:
+                            trade_idea = scanner.scan({'symbol': symbol}, five_min_candle, pdh_map[symbol])
+                            if trade_idea:
+                                order_manager.add_potential_trade(trade_idea, backtest_date)
+                one_min_candle_start_time_str = candle_start_dt.strftime("%H:%M")
+                stocks_in_1min_candle = {}
+                for sym, df in one_min_data.items():
+                    if not df.empty and one_min_candle_start_time_str in df['time'].values:
+                        stocks_in_1min_candle[sym] = df[df['time'] == one_min_candle_start_time_str].iloc[0]
+                if stocks_in_1min_candle:
+                    order_manager.process_active_trades(stocks_in_1min_candle)
+            print()
+            ReportFormatter.print_status("Market simulation complete.", "SUCCESS")
 
-    if not all_1min_datetimes:
-        ReportFormatter.print_status("No 1-minute data available to run simulation.", "WARNING")
-    else:
-        unique_1min_datetimes = sorted(list(set(all_1min_datetimes)))
-        ReportFormatter.print_status(f"Market simulation ready: Processing {len(unique_1min_datetimes)} 1-minute candles.", "INFO")
+        last_candles = {sym: df.iloc[-1] for sym, df in one_min_data.items() if not df.empty}
+        order_manager.square_off_open_trades(last_candles)
+        order_manager._scanner_stats = scanner.get_stats()
 
-        # The simulation clock advances minute by minute based on the start time of 1-min candles
-        for i, candle_start_dt in enumerate(unique_1min_datetimes):
+        # --- STAGE 3: COMPREHENSIVE REPORTING (FOR THE DAY) ---
+        order_manager.generate_report(output_folder=output_folder)
 
-            # The data for a candle is available only after it closes
-            current_processing_dt = candle_start_dt + timedelta(minutes=1)
-            current_processing_time_str = current_processing_dt.strftime("%H:%M")
-
-            if current_processing_time_str > cfg.DAY_END_SQUARE_OFF:
-                break
-
-            # Progress indicator - console only
-            print(f"\r{Fore.WHITE}Processing Time: {current_processing_time_str} ({i+1}/{len(unique_1min_datetimes)}){Style.RESET_ALL}", end="")
-
-            # --- 5-Minute Breakout Scanning ---
-            # A 5-minute candle is available for processing after it closes.
-            # e.g., at 09:20, the candle that *started* at 09:15 is complete.
-            if current_processing_dt.minute % int(cfg.CANDLE_INTERVAL) == 0:
-                five_min_candle_start_dt = current_processing_dt - timedelta(minutes=int(cfg.CANDLE_INTERVAL))
-                five_min_candle_start_time_str = five_min_candle_start_dt.strftime("%H:%M")
-
-                # Collect all 5-min candles that just closed
-                stocks_in_5min_candle = {}
-                for sym, df in five_min_data.items():
-                    if not df.empty:
-                        mask = df['time'] == five_min_candle_start_time_str
-                        if mask.any():
-                            stocks_in_5min_candle[sym] = df[mask].iloc[0]
-
-                for symbol, five_min_candle in stocks_in_5min_candle.items():
-                    if symbol in pdh_map:
-                        trade_idea = scanner.scan({'symbol': symbol}, five_min_candle, pdh_map[symbol])
-                        if trade_idea:
-                            order_manager.add_potential_trade(trade_idea, backtest_date)
-                            breakouts_detected += 1
-
-            # --- 1-Minute Trade Processing ---
-            # This runs every minute to check for entries and exits using the candle that just closed.
-            one_min_candle_start_time_str = candle_start_dt.strftime("%H:%M")
-
-            stocks_in_1min_candle = {}
-            for sym, df in one_min_data.items():
-                if not df.empty:
-                    mask = df['time'] == one_min_candle_start_time_str
-                    if mask.any():
-                        stocks_in_1min_candle[sym] = df[mask].iloc[0]
-
-            if stocks_in_1min_candle:
-                order_manager.process_active_trades(stocks_in_1min_candle)
-
-    print()  # New line after progress
-    ReportFormatter.print_status("Market simulation complete.", "SUCCESS")
-
-    # Final square-off
-    last_candles = {sym: df.iloc[-1] for sym, df in one_min_data.items() if not df.empty}
-    order_manager.square_off_open_trades(last_candles)
-
-    # Store scanner stats in order manager for reporting
-    order_manager._scanner_stats = scanner.get_stats()
-
-    # --- STAGE 3: COMPREHENSIVE REPORTING ---
-    order_manager.generate_report(output_folder=output_folder)
-
-    # Final system summary
-    end_time = datetime.now()
-    total_runtime = (end_time - start_time).total_seconds()
-
-    ReportFormatter.print_header("EXECUTION SUMMARY")
-    summary_data = [
-        ["Backtest Date", backtest_date.strftime('%Y-%m-%d (%A)')],
-        ["Total Runtime", f"{total_runtime:.1f} seconds"],
-        ["Symbols Analyzed", len(all_symbols)],
-        ["Qualified Stocks", len(filtered_stocks)],
-        ["Breakout Signals", breakouts_detected],
-        ["Trades Executed", order_manager.trade_stats['triggered_trades']],
-        ["Final Status", "✓ COMPLETED SUCCESSFULLY"]
-    ]
-    logging.info(tabulate(summary_data, headers=["Metric", "Value"], tablefmt="rounded_grid"))
-
-    ReportFormatter.print_status("Backtest analysis completed successfully", "SUCCESS")
+    ReportFormatter.print_header("MULTI-DAY BACKTEST RUN COMPLETED")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        # This will be caught by the logger if it's initialized
         if logging.getLogger().hasHandlers():
             logging.info(f"\n{Fore.YELLOW}Process interrupted by user. Graceful shutdown initiated...{Style.RESET_ALL}")
         else:
             print(f"\n{Fore.YELLOW}Process interrupted by user. Graceful shutdown initiated...{Style.RESET_ALL}")
     except Exception as e:
-        # This will be caught by the logger if it's initialized
         if logging.getLogger().hasHandlers():
             logging.error(f"A critical error occurred: {e}")
             logging.error(traceback.format_exc())
