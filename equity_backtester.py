@@ -282,10 +282,12 @@ class OrderManager:
 
             # Process pending trades to see if they trigger
             if trade['status'] == 'pending':
-                if high >= trade['entry_point']:
+                # A spurt signal is now required to trigger the entry
+                spurt_detected = current_candle.get('Spurt_Signal', False)
+                if high >= trade['entry_point'] and spurt_detected:
                     trade['status'] = 'active'
                     trade['entry_time'] = current_time
-                    print(f"\n{Fore.GREEN}Trade Triggered: {symbol} ({trade['type']}) at {trade['entry_point']:.2f}{Style.RESET_ALL}")
+                    print(f"\n{Fore.GREEN}Trade Triggered (Spurt): {symbol} ({trade['type']}) at {trade['entry_point']:.2f}{Style.RESET_ALL}")
 
             # Process active trades for exit
             if trade['status'] == 'active':
@@ -344,8 +346,41 @@ class OrderManager:
         print(f"\nTrade log saved to {filename}")
 
 # ============================================================================
-# MAIN FUNCTION
+# UTILITY FUNCTIONS
 # ============================================================================
+def calculate_spurt_indicators(df):
+    """Calculates ATR, Volume MA, and identifies spurts in the data."""
+    if df.empty or len(df) < max(cfg.VOLUME_WINDOW, cfg.ATR_WINDOW):
+        return df
+
+    df = df.copy()
+
+    # Calculate True Range (TR) and Average True Range (ATR)
+    df['previous_close'] = df['close'].shift(1)
+    df['high_low_range'] = df['high'] - df['low']
+    df['high_prev_close_range'] = abs(df['high'] - df['previous_close'])
+    df['low_prev_close_range'] = abs(df['low'] - df['previous_close'])
+    df['tr'] = df[['high_low_range', 'high_prev_close_range', 'low_prev_close_range']].max(axis=1)
+    df['atr'] = df['tr'].rolling(window=cfg.ATR_WINDOW, min_periods=cfg.ATR_WINDOW).mean()
+
+    # Calculate Volume Moving Average
+    df['volume_ma'] = df['volume'].rolling(window=cfg.VOLUME_WINDOW, min_periods=cfg.VOLUME_WINDOW).mean()
+
+    # Calculate Price Change over 5 minutes
+    df['price_change_5min'] = df['close'].diff(periods=5)
+
+    # Identify Spurt Conditions
+    df['volume_spurt'] = df['volume'] >= (df['volume_ma'] * cfg.VOLUME_SPURT_FACTOR)
+    df['price_spurt'] = abs(df['price_change_5min']) >= (df['atr'] * cfg.PRICE_SPURT_FACTOR)
+
+    # Final Spurt Signal
+    df['Spurt_Signal'] = df['volume_spurt'] & df['price_spurt']
+
+    # Clean up intermediate columns
+    df = df.drop(columns=['previous_close', 'high_low_range', 'high_prev_close_range', 'low_prev_close_range', 'tr'])
+
+    return df
+
 def get_trading_day(days_back):
     """Get the specific trading day to backtest."""
     check_date = datetime.now().date() - timedelta(days=days_back)
@@ -382,6 +417,13 @@ def main():
     # Fetch all data for the day upfront
     five_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.CANDLE_INTERVAL)
     one_min_data = fyers_data.get_bulk_intraday_data(pre_filtered_symbols, backtest_date, cfg.MINUTE_RESOLUTION)
+
+    # Calculate spurt indicators for all 1-min data
+    print("\nCalculating spurt indicators for 1-minute data...")
+    for symbol in one_min_data:
+        if not one_min_data[symbol].empty:
+            one_min_data[symbol] = calculate_spurt_indicators(one_min_data[symbol])
+    print("Indicator calculation complete.")
 
     # Save 5-min data to CSV
     all_5min_df = pd.concat([df.assign(symbol=sym) for sym, df in five_min_data.items() if not df.empty])

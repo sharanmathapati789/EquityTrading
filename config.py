@@ -33,3 +33,9 @@ STAGE_SL_PERCENT = 0.4
 MARKET_OPEN_TIME = "09:15"
 MARKET_CLOSE_TIME = "15:15"
 DAY_END_SQUARE_OFF = "15:20" # Time to square off any open positions
+
+# Equity Spurts Monitor Parameters
+VOLUME_WINDOW = 14
+ATR_WINDOW = 14
+VOLUME_SPURT_FACTOR = 3.0
+PRICE_SPURT_FACTOR = 1.5
