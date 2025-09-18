@@ -2,3 +2,4 @@ pandas
 numpy
 fyers-apiv3
 colorama
+tabulate
