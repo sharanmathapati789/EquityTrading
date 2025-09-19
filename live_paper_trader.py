@@ -297,7 +297,16 @@ def main():
     today = datetime.now().date()
 
     ReportFormatter.print_section("Pre-Market Analysis")
-    all_symbols = [s.split('-EQ')[0].split('NSE:')[1] for s in pd.read_csv(cfg.SYMBOL_CSV)['fyers_symbol'].dropna().tolist()]
+    raw_symbols = pd.read_csv(cfg.SYMBOL_CSV)['fyers_symbol'].dropna().tolist()
+    all_symbols = []
+    for s in raw_symbols:
+        symbol_name = s
+        if symbol_name.startswith("NSE:"):
+            symbol_name = symbol_name[4:]
+        if symbol_name.endswith("-EQ"):
+            symbol_name = symbol_name[:-3]
+        if symbol_name: # Ensure we don't add empty strings
+            all_symbols.append(symbol_name)
     filtered_stocks = PreFilterEngine(fyers_data).process_symbols(all_symbols, today - timedelta(days=1))
     if not filtered_stocks: ReportFormatter.print_status("No stocks passed pre-filter. Exiting.", "WARNING"); return
 
